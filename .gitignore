@@ -1,0 +1,38 @@
+# IDE folders
+.vs/
+.vscode/
+bin/
+obj/
+
+# Unity standard gitignore
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Mm]emoryCaptures/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.IDB
+*.v12.suo
+*.v13.suo
+*.v14.suo
+*.v15.suo
+
+# Asset meta data when using external version control
+# .meta files should be included
+
+# OS generated files
+.DS_Store
+Thumbs.db

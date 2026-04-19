@@ -135,8 +135,12 @@ public class ArrowTile : MonoBehaviour
         }
 
         // Hướng bay 3D thế giới của Head
+        float flyDirX = data.initialDirection.x;
+        float flyDirY = data.initialDirection.y;
+        if (startFaceIndex < 4) flyDirX = -flyDirX;
+        else if (startFaceIndex == 5) flyDirY = -flyDirY;
         Vector3 headFlyDir = faceGrid.transform.TransformDirection(
-            new Vector3(data.initialDirection.x, data.initialDirection.y, 0f)).normalized;
+            new Vector3(flyDirX, flyDirY, 0f)).normalized;
 
         // Điểm bay xa (Head bay ra khỏi cube)
         Vector3 headStart = cellWorldPositions[0];
@@ -211,8 +215,12 @@ public class ArrowTile : MonoBehaviour
             if (outline != null) outline.SetActive(true);
         }
 
+        float flyDirX = data.initialDirection.x;
+        float flyDirY = data.initialDirection.y;
+        if (startFaceIndex < 4) flyDirX = -flyDirX;
+        else if (startFaceIndex == 5) flyDirY = -flyDirY;
         Vector3 worldDir = faceGrid.transform.TransformDirection(
-            new Vector3(data.initialDirection.x, data.initialDirection.y, 0f)).normalized;
+            new Vector3(flyDirX, flyDirY, 0f)).normalized;
 
         Vector3 rootOrig = transform.position;
         Vector3 rootBump = rootOrig + worldDir * 0.15f;

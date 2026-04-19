@@ -69,7 +69,18 @@ public class FaceGrid : MonoBehaviour
     {
         float startX = -(gridWidth - 1) * cellSize / 2f;
         float startY = -(gridHeight - 1) * cellSize / 2f;
-        return new Vector3(startX + coords.x * cellSize, startY + coords.y * cellSize, 0f);
+        
+        float localX = startX + coords.x * cellSize;
+        // Các mặt xung quanh (Front, Back, Left, Right) hướng ra ngoài, nên trục X local bị lật ngược (nhìn từ ngoài vào).
+        // Ta lật ngược lại localX để 'Data x=0' luôn luôn là "Cạnh Trái" (Visual Left).
+        if (faceIndex < 4) localX = -localX;
+
+        float localY = startY + coords.y * cellSize;
+        // Mặt Bottom nằm ở dưới Front trong editor, nhưng bị rotate làm lật ngược y.
+        // Ta lật y lại để đồng bộ visual kéo xuống.
+        if (faceIndex == 5) localY = -localY;
+
+        return new Vector3(localX, localY, 0f);
     }
 
     public Vector3 GetWorldPosition(Vector2Int coords)
@@ -80,7 +91,15 @@ public class FaceGrid : MonoBehaviour
     public Vector3 GetEdgeWorldPosition(Vector2Int lastGridPos, Vector2Int dir)
     {
         Vector3 localPos = GetLocalPosition(lastGridPos);
-        localPos += new Vector3(dir.x, dir.y, 0f) * (cellSize / 2f);
+        
+        // Hướng đi cũng cần được lật ngược X để khớp với Data
+        float abstractDirX = dir.x * (cellSize / 2f);
+        if (faceIndex < 4) abstractDirX = -abstractDirX;
+
+        float abstractDirY = dir.y * (cellSize / 2f);
+        if (faceIndex == 5) abstractDirY = -abstractDirY;
+
+        localPos += new Vector3(abstractDirX, abstractDirY, 0f);
         return transform.TransformPoint(localPos);
     }
 

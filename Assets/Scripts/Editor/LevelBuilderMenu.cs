@@ -6,12 +6,17 @@ using System.Collections.Generic;
 public class LevelBuilderMenu : MonoBehaviour
 {
     [MenuItem("Tools/Arrow Cube Escape/Generate Level from GameManager")]
-    public static void GenerateCubeLevel()
+    public static void GenerateCubeLevelFromMenu()
+    {
+        GenerateCubeLevel(null);
+    }
+
+    public static void GenerateCubeLevel(ArrowLevelData editorOverride = null)
     {
         GameManager gm = GameObject.FindObjectOfType<GameManager>();
         if (gm == null) gm = new GameObject("GameManager").AddComponent<GameManager>();
 
-        ArrowLevelData levelData = gm.currentLevelData;
+        ArrowLevelData levelData = editorOverride != null ? editorOverride : gm.currentLevelData;
         int gridSize = 5;
         if (levelData == null) Debug.LogWarning("Chưa gán currentLevelData trong GameManager!");
         else gridSize = levelData.gridSize;
@@ -20,6 +25,8 @@ public class LevelBuilderMenu : MonoBehaviour
 
         StructurePivot pivot = GameObject.FindObjectOfType<StructurePivot>();
         if (pivot == null) pivot = new GameObject("StructurePivot").AddComponent<StructurePivot>();
+        pivot.transform.position = Vector3.zero;
+        pivot.transform.rotation = Quaternion.identity;
         while (pivot.transform.childCount > 0) DestroyImmediate(pivot.transform.GetChild(0).gameObject);
 
         // ======== 1. KHỐI KÍNH ========
@@ -178,7 +185,10 @@ public class LevelBuilderMenu : MonoBehaviour
             vis.transform.SetParent(seg.transform);
             vis.transform.localPosition = Vector3.zero;
             vis.transform.localRotation = Quaternion.identity;
-            vis.transform.localScale = new Vector3(cellSize * 0.65f, cellSize * 0.65f, lineDepth);
+            
+            // Thu nhỏ phần thân (i > 0) đi 1 nửa để đầu to hơn
+            float bodySize = (i == 0) ? (cellSize * 0.65f) : (cellSize * 0.4f);
+            vis.transform.localScale = new Vector3(bodySize, bodySize, lineDepth);
             vis.GetComponent<MeshRenderer>().material = (i == 0) ? headMat : inkMat;
 
             // === Đường viền đỏ (ẩn mặc định, hiện khi bị chặn) ===
@@ -188,8 +198,7 @@ public class LevelBuilderMenu : MonoBehaviour
             outline.transform.SetParent(seg.transform);
             outline.transform.localPosition = new Vector3(0f, 0f, -0.001f);
             outline.transform.localRotation = Quaternion.identity;
-            outline.transform.localScale = new Vector3(
-                cellSize * 0.65f * outlineScale, cellSize * 0.65f * outlineScale, lineDepth * 0.5f);
+            outline.transform.localScale = new Vector3(bodySize * outlineScale, bodySize * outlineScale, lineDepth * 0.5f);
             outline.GetComponent<MeshRenderer>().material = outlineMat;
             outline.SetActive(false);
             outOutlines.Add(outline);
@@ -197,8 +206,12 @@ public class LevelBuilderMenu : MonoBehaviour
             // === Nếu là Head (i==0): thêm chóp mũi tên ===
             if (i == 0)
             {
+                float flyDirX = flightDir.x;
+                float flyDirY = flightDir.y;
+                if (cell.faceIndex < 4) flyDirX = -flyDirX;
+                else if (cell.faceIndex == 5) flyDirY = -flyDirY;
                 Vector3 dW = face.transform.TransformDirection(
-                    new Vector3(flightDir.x, flightDir.y, 0f)).normalized;
+                    new Vector3(flyDirX, flyDirY, 0f)).normalized;
                 Vector3 tip = wPos + dW * (cellSize * 0.35f);
 
                 GameObject head = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -207,17 +220,18 @@ public class LevelBuilderMenu : MonoBehaviour
                 head.transform.position = tip;
                 head.transform.rotation = Quaternion.LookRotation(dW, fN)
                                           * Quaternion.Euler(0, 0, 45f);
-                float ts = lineWidth * 2f;
+                float ts = lineWidth * 2.2f;
                 head.transform.localScale = new Vector3(ts, lineDepth, ts);
                 head.GetComponent<MeshRenderer>().material = headMat;
             }
 
-            // === Nét nối tới cell tiếp theo (i+1) — chỉ nếu cùng mặt ===
+            // === Nét nối tới cell tiếp theo (i+1) ===
             if (i < allCells.Count - 1)
             {
                 BodyCell nextCell = allCells[i + 1];
                 if (nextCell.faceIndex == cell.faceIndex)
                 {
+                    // --- Cùng mặt: 1 đoạn thẳng ---
                     Vector3 wNext = face.GetWorldPosition(nextCell.position) + fN * surfOff;
                     float dist = Vector3.Distance(wPos, wNext);
                     if (dist > 0.01f)
@@ -232,6 +246,64 @@ public class LevelBuilderMenu : MonoBehaviour
                         line.transform.rotation = Quaternion.LookRotation(dir, fN);
                         line.transform.localScale = new Vector3(lineWidth, lineDepth, dist + lineWidth * 0.4f);
                         line.GetComponent<MeshRenderer>().material = inkMat;
+                    }
+                }
+                else
+                {
+                    // --- Khác mặt: 2 đoạn gặp nhau ở cạnh khối ---
+                    FaceGrid nextFace = grids[nextCell.faceIndex];
+                    Vector3 nextFN = nextFace.transform.forward;
+                    Vector3 wNext = nextFace.GetWorldPosition(nextCell.position) + nextFN * surfOff;
+
+                    // Tính điểm góc (cube edge) thật sự nhờ giao tuyến của 2 mặt vuông góc
+                    Vector3 trueEdge = Vector3.zero;
+                    float nAx = Mathf.Abs(Mathf.Round(fN.x));
+                    float nAy = Mathf.Abs(Mathf.Round(fN.y));
+                    float nAz = Mathf.Abs(Mathf.Round(fN.z));
+                    float nBx = Mathf.Abs(Mathf.Round(nextFN.x));
+                    float nBy = Mathf.Abs(Mathf.Round(nextFN.y));
+                    float nBz = Mathf.Abs(Mathf.Round(nextFN.z));
+
+                    trueEdge.x = (nAx > 0.5f) ? wPos.x : (nBx > 0.5f) ? wNext.x : (wPos.x + wNext.x) / 2f;
+                    trueEdge.y = (nAy > 0.5f) ? wPos.y : (nBy > 0.5f) ? wNext.y : (wPos.y + wNext.y) / 2f;
+                    trueEdge.z = (nAz > 0.5f) ? wPos.z : (nBz > 0.5f) ? wNext.z : (wPos.z + wNext.z) / 2f;
+
+                    Vector3 edgeMid = trueEdge;
+
+                    // Đoạn 1: cell hiện tại → cạnh (trên mặt hiện tại)
+                    float dist1 = Vector3.Distance(wPos, edgeMid);
+                    if (dist1 > 0.01f)
+                    {
+                        Vector3 center1 = (wPos + edgeMid) / 2f;
+                        Vector3 dir1 = (edgeMid - wPos).normalized;
+
+                        GameObject line1 = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        DestroyImmediate(line1.GetComponent<Collider>());
+                        line1.name = "CrossEdge_A";
+                        line1.transform.SetParent(seg.transform);
+                        line1.transform.position = center1;
+                        line1.transform.rotation = Quaternion.LookRotation(dir1, fN);
+                        line1.transform.localScale = new Vector3(lineWidth, lineDepth, dist1 + lineWidth * 0.2f);
+                        line1.GetComponent<MeshRenderer>().material = inkMat;
+                    }
+
+                    // Đoạn 2: cạnh → cell tiếp theo (trên mặt tiếp theo)
+                    // Sẽ được gán vào segment tiếp theo (i+1) ở vòng lặp sau,
+                    // nhưng ta tạo ngay ở đây gán vào seg hiện tại để đảm bảo visual
+                    float dist2 = Vector3.Distance(edgeMid, wNext);
+                    if (dist2 > 0.01f)
+                    {
+                        Vector3 center2 = (edgeMid + wNext) / 2f;
+                        Vector3 dir2 = (wNext - edgeMid).normalized;
+
+                        GameObject line2 = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        DestroyImmediate(line2.GetComponent<Collider>());
+                        line2.name = "CrossEdge_B";
+                        line2.transform.SetParent(seg.transform);
+                        line2.transform.position = center2;
+                        line2.transform.rotation = Quaternion.LookRotation(dir2, nextFN);
+                        line2.transform.localScale = new Vector3(lineWidth, lineDepth, dist2 + lineWidth * 0.2f);
+                        line2.GetComponent<MeshRenderer>().material = inkMat;
                     }
                 }
             }

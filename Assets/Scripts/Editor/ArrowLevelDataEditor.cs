@@ -1,432 +1,561 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
 
+/// <summary>
+/// Custom Editor cho ArrowLevelData — workflow hoàn toàn click-based:
+///   1. Bấm [＋ Mũi Tên Mới] → click ô đặt đầu
+///   2. Bấm hướng bay (4 nút ↑↓←→)
+///   3. Click dấu ＋ xung quanh đuôi để vẽ thân → ＋ tự hiện ở mặt kế nếu đến mép
+/// Hiện 6 mặt cùng lúc (cube net) để thấy cross-face liền mạch.
+/// </summary>
 [CustomEditor(typeof(ArrowLevelData))]
 public class ArrowLevelDataEditor : Editor
 {
-    private int selectedFaceIndex = 0;
+    private enum State { Idle, PlacingHead, ChoosingDir, DrawingBody }
 
-    // ======== DRAW MODE STATE (static vì Editor có thể bị tạo lại) ========
-    private static bool isDrawing = false;
-    private static int drawFace = -1;   // Face chứa arrowhead đang vẽ
-    private static int drawIndex = -1;  // Index trong face.arrows
+    private struct Candidate { public int face; public Vector2Int pos; }
 
-    private Vector2Int[] dirs = {
-        new Vector2Int(0, 1),   // Up
-        new Vector2Int(1, 0),   // Right
-        new Vector2Int(0, -1),  // Down
-        new Vector2Int(-1, 0)   // Left
+    // Cube net layout: [row, col, faceIndex]
+    //          col0   col1    col2    col3
+    // row0:           Top(4)
+    // row1: Left(2)  Front(0) Right(3) Back(1)
+    // row2:          Bottom(5)
+    private static readonly int[,] NET = {
+        {0,1,4}, {1,0,2}, {1,1,0}, {1,2,3}, {1,3,1}, {2,1,5}
     };
-    private string[] arrows = { "↑", "→", "↓", "←" };
+    private static readonly string[] FN = {"Front","Back","Left","Right","Top","Bottom"};
 
+    // Colors
+    private static readonly Color C_HEAD  = new Color(0f, 0.75f, 0.85f);
+    private static readonly Color C_BODY  = new Color(0.25f, 0.25f, 0.25f);
+    private static readonly Color C_CROSS = new Color(0.6f, 0.15f, 0.7f, 0.9f);
+    private static readonly Color C_EMPTY = new Color(0.93f, 0.93f, 0.93f);
+    private static readonly Color C_GRID  = new Color(0.72f, 0.72f, 0.72f, 0.5f);
+    private static readonly Color C_SEL   = new Color(1f, 0.85f, 0.1f);
+    private static readonly Color C_PLUS  = new Color(0.15f, 0.78f, 0.3f, 0.75f);
+    private static readonly Color C_DIR   = new Color(1f, 0.45f, 0.1f, 0.85f);
+    private static readonly Color C_PLACE = new Color(0.4f, 0.75f, 1f, 0.25f);
+    private static readonly Color C_FLBL  = new Color(0.3f, 0.3f, 0.3f, 0.75f);
+
+    // State
+    private State state = State.Idle;
+    private int selF = -1, selA = -1;
+    private List<Candidate> expand = new List<Candidate>();
+    private Vector2 scroll;
+
+    // ================================================================
     public override void OnInspectorGUI()
     {
-        ArrowLevelData data = (ArrowLevelData)target;
-        EditorGUI.BeginChangeCheck();
+        ArrowLevelData ld = (ArrowLevelData)target;
 
-        // Validate draw state
-        ValidateDrawState(data);
+        EditorGUILayout.LabelField("⚙️ Cấu Hình", EditorStyles.boldLabel);
+        ld.gridSize = EditorGUILayout.IntSlider("Grid Size", ld.gridSize, 3, 10);
+        EditorGUILayout.Space(5);
 
-        // ======== BƯỚC 1: GRID SIZE ========
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("BƯỚC 1: Cấu Hình Ma Trận", EditorStyles.boldLabel);
-        data.gridSize = EditorGUILayout.IntSlider("Size (VD: 3x3 hoặc 5x5)", data.gridSize, 3, 10);
+        if (ld.faces == null || ld.faces.Length != 6) { EditorGUILayout.HelpBox("faces chưa khởi tạo!", MessageType.Error); return; }
 
-        EditorGUILayout.Space();
+        // State bar
+        DrawStateBar(ld);
+        EditorGUILayout.Space(3);
 
-        // ======== BƯỚC 2: CHỌN MẶT (với highlight cross-face) ========
-        EditorGUILayout.LabelField("BƯỚC 2: Chọn Mặt Của Khối", EditorStyles.boldLabel);
+        // Cube Net
+        scroll = EditorGUILayout.BeginScrollView(scroll);
+        DrawCubeNet(ld);
+        EditorGUILayout.EndScrollView();
 
-        // Tính valid next cells để biết face nào có thể vẽ tiếp
-        var validNexts = isDrawing ? GetValidNextCells(data) : null;
+        EditorGUILayout.Space(8);
+        DrawArrowList(ld);
 
-        GUILayout.BeginHorizontal();
-        for (int i = 0; i < 6; i++)
-        {
-            bool isSelected = (selectedFaceIndex == i);
-            bool canDrawHere = validNexts != null && validNexts.Exists(v => v.face == i);
-
-            if (isSelected)
-                GUI.backgroundColor = Color.green;
-            else if (isDrawing && canDrawHere)
-                GUI.backgroundColor = Color.yellow; // Gợi ý: có thể vẽ sang mặt này!
-            else
-                GUI.backgroundColor = Color.white;
-
-            if (GUILayout.Button(data.faces[i].faceName, EditorStyles.miniButton, GUILayout.Height(25)))
-                selectedFaceIndex = i;
-        }
+        EditorGUILayout.Space(8);
+        GUI.backgroundColor = new Color(0.3f, 0.9f, 0.4f);
+        if (GUILayout.Button("🔨 Generate Level", GUILayout.Height(30)))
+            LevelBuilderMenu.GenerateCubeLevel(ld);
         GUI.backgroundColor = Color.white;
-        GUILayout.EndHorizontal();
 
-        EditorGUILayout.Space();
+        if (GUI.changed) EditorUtility.SetDirty(target);
+    }
 
-        // ======== BƯỚC 3: LƯỚI TƯƠNG TÁC ========
-        FaceData currentFace = data.faces[selectedFaceIndex];
-        if (currentFace.arrows == null) currentFace.arrows = new List<ArrowSpawnData>();
-
-        // Draw mode banner
-        if (isDrawing)
+    // ================================================================
+    // STATE BAR
+    // ================================================================
+    private void DrawStateBar(ArrowLevelData ld)
+    {
+        switch (state)
         {
-            EditorGUILayout.BeginHorizontal("helpbox");
-            GUI.backgroundColor = new Color(0.4f, 0.9f, 1f);
-            EditorGUILayout.LabelField("✏️ CHẾ ĐỘ VẼ THÂN — Click ô vàng để mở rộng, click ô đỏ để xoá cuối", EditorStyles.boldLabel);
-            if (GUILayout.Button("❌ Xong", GUILayout.Width(60), GUILayout.Height(20)))
+            case State.PlacingHead:
+                EditorGUILayout.HelpBox("🎯 Click vào ô trống trên BẤT KỲ mặt nào để đặt ĐẦU mũi tên", MessageType.Warning);
+                break;
+            case State.ChoosingDir:
+                EditorGUILayout.HelpBox("🧭 Chọn HƯỚNG BAY cho đầu mũi tên:", MessageType.Warning);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                if (DirBtn("↑ Lên", 0, 1, ld)) { }
+                if (DirBtn("↓ Xuống", 0, -1, ld)) { }
+                if (DirBtn("← Trái", -1, 0, ld)) { }
+                if (DirBtn("→ Phải", 1, 0, ld)) { }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+                break;
+            case State.DrawingBody:
+                EditorGUILayout.HelpBox(
+                    "🖌️ Click dấu ＋ (xanh lá) xung quanh đuôi để nối thân.\n" +
+                    "Khi đến mép mặt → ＋ tự hiện ở mặt kế tiếp!", MessageType.Info);
+                break;
+            default:
+                EditorGUILayout.HelpBox("Bấm [＋ Mũi Tên Mới] hoặc click vào đầu (H) trên lưới để chọn", MessageType.None);
+                break;
+        }
+
+        if (state != State.Idle)
+        {
+            GUI.backgroundColor = new Color(1f, 0.35f, 0.35f);
+            if (GUILayout.Button("✕ Hủy / Xong", GUILayout.Height(22)))
             {
-                isDrawing = false;
-                drawFace = -1;
-                drawIndex = -1;
+                // Nếu đang PlacingHead mà chưa đặt → xóa arrow rỗng nếu có
+                state = State.Idle;
+                expand.Clear();
+                Repaint();
             }
             GUI.backgroundColor = Color.white;
-            EditorGUILayout.EndHorizontal();
         }
-        else
+    }
+
+    private bool DirBtn(string label, int dx, int dy, ArrowLevelData ld)
+    {
+        GUI.backgroundColor = C_DIR;
+        bool clicked = GUILayout.Button(label, GUILayout.Width(70), GUILayout.Height(28));
+        GUI.backgroundColor = Color.white;
+        if (clicked && selF >= 0 && selA >= 0)
         {
-            EditorGUILayout.LabelField($"BƯỚC 3: Vẽ Mũi Tên ({data.faces[selectedFaceIndex].faceName})", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Click ô trống → đặt mũi tên ↑. Click tiếp → xoay → xoá.\nSau đó ấn ✏️ ở Bước 4 để vẽ thân.", MessageType.None);
+            ld.faces[selF].arrows[selA].initialDirection = new Vector2Int(dx, dy);
+            state = State.DrawingBody;
+            RefreshExpand(ld);
+            EditorUtility.SetDirty(target);
+            Repaint();
         }
+        return clicked;
+    }
 
-        // Pre-compute hiển thị
-        HashSet<string> bodyCellSet = new HashSet<string>();
-        HashSet<string> headCellSet = new HashSet<string>();
-        Dictionary<string, int> cellToArrowIndex = new Dictionary<string, int>();
+    // ================================================================
+    // CUBE NET
+    // ================================================================
+    private float CellPx(int gs)
+    {
+        return Mathf.Clamp((EditorGUIUtility.currentViewWidth - 50) / (gs * 4 + 4), 14f, 28f);
+    }
 
-        // Duyệt TẤT CẢ arrow trên TẤT CẢ face để tìm body cells hiển thị trên face hiện tại
+    private void DrawCubeNet(ArrowLevelData ld)
+    {
+        int gs = ld.gridSize;
+        float px = CellPx(gs);
+        float fp = px * gs;
+        float gap = 3f;
+        float h = 3 * (fp + gap + 14) + 10;
+
+        Rect area = GUILayoutUtility.GetRect(4 * (fp + gap), h);
+
+        for (int n = 0; n < 6; n++)
+        {
+            int row = NET[n, 0], col = NET[n, 1], fi = NET[n, 2];
+            float fx = area.x + col * (fp + gap);
+            float fy = area.y + row * (fp + gap + 14);
+
+            // Label
+            Rect lr = new Rect(fx, fy, fp, 13);
+            EditorGUI.DrawRect(lr, C_FLBL);
+            GUI.Label(lr, $"{fi}:{FN[fi]}", LabelStyle(Color.white, 9, FontStyle.Bold));
+
+            // Face bg
+            Rect fr = new Rect(fx, fy + 14, fp, fp);
+            EditorGUI.DrawRect(fr, C_EMPTY);
+
+            // Placeable highlight
+            if (state == State.PlacingHead)
+                EditorGUI.DrawRect(fr, C_PLACE);
+
+            DrawFace(ld, fi, fr, gs, px);
+
+            // Grid lines
+            for (int x = 0; x <= gs; x++)
+                EditorGUI.DrawRect(new Rect(fr.x + x * px, fr.y, 1, fp), C_GRID);
+            for (int y = 0; y <= gs; y++)
+                EditorGUI.DrawRect(new Rect(fr.x, fr.y + y * px, fp, 1), C_GRID);
+
+            HandleClick(ld, fi, fr, gs, px);
+        }
+    }
+
+    // ================================================================
+    // DRAW FACE CONTENT
+    // ================================================================
+    private void DrawFace(ArrowLevelData ld, int fi, Rect fr, int gs, float px)
+    {
+        // 1. Draw all arrows' cells visible on this face
         for (int f = 0; f < 6; f++)
         {
-            if (data.faces[f].arrows == null) continue;
-            for (int a = 0; a < data.faces[f].arrows.Count; a++)
+            if (ld.faces[f].arrows == null) continue;
+            for (int a = 0; a < ld.faces[f].arrows.Count; a++)
             {
-                var arrow = data.faces[f].arrows[a];
+                var arr = ld.faces[f].arrows[a];
+                bool sel = (f == selF && a == selA);
+                float alpha = sel ? 1f : 0.35f;
+
                 // Head
-                if (f == selectedFaceIndex)
+                if (f == fi)
                 {
-                    string headKey = $"{arrow.position.x},{arrow.position.y}";
-                    headCellSet.Add(headKey);
-                    cellToArrowIndex[headKey] = a;
+                    Color hc = WithAlpha(C_HEAD, alpha);
+                    CellDraw(fr, gs, px, arr.position, hc, sel, "H");
+                    if (sel && state != State.ChoosingDir)
+                        DirSymbol(fr, gs, px, arr.position, arr.initialDirection);
                 }
-                // Body cells trên face hiện tại
-                if (arrow.bodyCells != null)
+
+                // Body cells on this face
+                for (int b = 0; b < arr.bodyCells.Count; b++)
                 {
-                    foreach (var bc in arrow.bodyCells)
-                    {
-                        if (bc.faceIndex == selectedFaceIndex)
-                        {
-                            string key = $"{bc.position.x},{bc.position.y}";
-                            bodyCellSet.Add(key);
-                        }
-                    }
+                    var bc = arr.bodyCells[b];
+                    if (bc.faceIndex != fi) continue;
+                    bool cross = (f != fi);
+                    Color c = sel ? (cross ? C_CROSS : C_BODY) : WithAlpha(C_BODY, 0.3f);
+                    string lbl = cross ? $"→{b + 1}" : $"{b + 1}";
+                    CellDraw(fr, gs, px, bc.position, c, sel, lbl);
                 }
             }
         }
 
-        // Valid next positions (chỉ trên face hiện tại)
-        HashSet<string> validSet = new HashSet<string>();
-        if (validNexts != null)
+        // 2. Expand candidates (＋ markers)
+        if (state == State.DrawingBody)
         {
-            foreach (var v in validNexts)
-                if (v.face == selectedFaceIndex)
-                    validSet.Add($"{v.pos.x},{v.pos.y}");
-        }
-
-        // Last body cell (có thể xoá bằng click)
-        string lastCellKey = "";
-        if (isDrawing && drawFace >= 0 && drawIndex >= 0)
-        {
-            var drawArrow = data.faces[drawFace].arrows[drawIndex];
-            if (drawArrow.bodyCells != null && drawArrow.bodyCells.Count > 0)
+            foreach (var c in expand)
             {
-                var last = drawArrow.bodyCells[drawArrow.bodyCells.Count - 1];
-                if (last.faceIndex == selectedFaceIndex)
-                    lastCellKey = $"{last.position.x},{last.position.y}";
+                if (c.face != fi) continue;
+                CellDraw(fr, gs, px, c.pos, C_PLUS, false, "＋");
             }
         }
 
-        // ======== VẼ LƯỚI ========
-        EditorGUILayout.BeginVertical("box");
-        for (int y = data.gridSize - 1; y >= 0; y--)
+        // 3. Direction chooser markers on grid (visual aid — actual choosing via buttons)
+        if (state == State.ChoosingDir && selF == fi && selF >= 0 && selA >= 0)
         {
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-            for (int x = 0; x < data.gridSize; x++)
+            var arr = ld.faces[selF].arrows[selA];
+            Vector2Int[] dirs = { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right };
+            string[] syms = { "▲", "▼", "◄", "►" };
+            for (int d = 0; d < 4; d++)
             {
-                Vector2Int pos = new Vector2Int(x, y);
-                string key = $"{x},{y}";
-
-                ArrowSpawnData existingArrow = (selectedFaceIndex < data.faces.Length)
-                    ? currentFace.arrows.Find(a => a.position == pos) : null;
-
-                bool isHead = headCellSet.Contains(key);
-                bool isBody = bodyCellSet.Contains(key);
-                bool isValid = validSet.Contains(key);
-                bool isLast = (key == lastCellKey);
-
-                // Chọn nhãn ô
-                string btnText = " ";
-                if (isHead && existingArrow != null)
-                {
-                    int di = GetDirIndex(existingArrow.initialDirection);
-                    btnText = (di >= 0) ? arrows[di] : "?";
-                    if (existingArrow.bodyCells != null && existingArrow.bodyCells.Count > 0)
-                        btnText += "·";
-                }
-                else if (isBody)
-                {
-                    btnText = isLast ? "✕" : "█";
-                }
-                else if (isValid)
-                {
-                    btnText = "+";
-                }
-
-                // Chọn màu nền
-                if (isHead)
-                    GUI.backgroundColor = new Color(0.5f, 0.95f, 0.5f);
-                else if (isLast)
-                    GUI.backgroundColor = new Color(1f, 0.5f, 0.5f); // Đỏ = click để xoá
-                else if (isBody)
-                    GUI.backgroundColor = new Color(1f, 0.85f, 0.5f); // Cam = thân
-                else if (isValid)
-                    GUI.backgroundColor = new Color(1f, 1f, 0.6f); // Vàng = click để thêm
-                else
-                    GUI.backgroundColor = Color.white;
-
-                // ======== XỬ LÝ CLICK ========
-                if (GUILayout.Button(btnText, GUILayout.Width(45), GUILayout.Height(45)))
-                {
-                    if (isDrawing)
-                    {
-                        // DRAW MODE
-                        if (isValid)
-                        {
-                            // Thêm body cell
-                            var drawArrow = data.faces[drawFace].arrows[drawIndex];
-                            if (drawArrow.bodyCells == null) drawArrow.bodyCells = new List<BodyCell>();
-                            drawArrow.bodyCells.Add(new BodyCell { faceIndex = selectedFaceIndex, position = pos });
-                        }
-                        else if (isLast)
-                        {
-                            // Xoá cell cuối (undo)
-                            var drawArrow = data.faces[drawFace].arrows[drawIndex];
-                            if (drawArrow.bodyCells != null && drawArrow.bodyCells.Count > 0)
-                                drawArrow.bodyCells.RemoveAt(drawArrow.bodyCells.Count - 1);
-                        }
-                    }
-                    else
-                    {
-                        // NORMAL MODE: đặt / xoay / xoá arrowhead
-                        if (existingArrow == null)
-                        {
-                            currentFace.arrows.Add(new ArrowSpawnData
-                            {
-                                position = pos,
-                                initialDirection = dirs[0],
-                                bodyCells = new List<BodyCell>()
-                            });
-                        }
-                        else
-                        {
-                            int ci = GetDirIndex(existingArrow.initialDirection);
-                            ci++;
-                            if (ci >= dirs.Length)
-                                currentFace.arrows.Remove(existingArrow);
-                            else
-                                existingArrow.initialDirection = dirs[ci];
-                        }
-                    }
-                }
-                GUI.backgroundColor = Color.white;
+                Vector2Int adj = arr.position + dirs[d];
+                if (adj.x >= 0 && adj.x < gs && adj.y >= 0 && adj.y < gs)
+                    CellDraw(fr, gs, px, adj, C_DIR, false, syms[d]);
             }
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.EndHorizontal();
-        }
-        EditorGUILayout.EndVertical();
-
-        EditorGUILayout.Space();
-
-        // ======== BƯỚC 4: PANEL CHI TIẾT + NÚT VẼ ========
-        EditorGUILayout.LabelField("BƯỚC 4: Chi Tiết Mũi Tên", EditorStyles.boldLabel);
-
-        if (currentFace.arrows.Count == 0)
-            EditorGUILayout.LabelField("Chưa có mũi tên. Hãy click lên lưới.", EditorStyles.miniLabel);
-
-        for (int i = 0; i < currentFace.arrows.Count; i++)
-        {
-            ArrowSpawnData a = currentFace.arrows[i];
-            int di = GetDirIndex(a.initialDirection);
-            string icon = (di >= 0) ? arrows[di] : "?";
-            int bodyCount = (a.bodyCells != null) ? a.bodyCells.Count : 0;
-            bool isThisDrawing = isDrawing && drawFace == selectedFaceIndex && drawIndex == i;
-
-            EditorGUILayout.BeginVertical("helpbox");
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField($"{icon} ({a.position.x},{a.position.y})  •  Thân: {bodyCount} ô", EditorStyles.boldLabel);
-
-            // Nút vẽ / xong
-            if (isThisDrawing)
-            {
-                GUI.backgroundColor = new Color(1f, 0.6f, 0.6f);
-                if (GUILayout.Button("❌ Xong Vẽ", GUILayout.Width(80)))
-                {
-                    isDrawing = false;
-                    drawFace = -1;
-                    drawIndex = -1;
-                }
-            }
-            else
-            {
-                GUI.backgroundColor = new Color(0.6f, 0.95f, 1f);
-                if (GUILayout.Button("✏️ Vẽ Thân", GUILayout.Width(80)))
-                {
-                    isDrawing = true;
-                    drawFace = selectedFaceIndex;
-                    drawIndex = i;
-                }
-            }
-            GUI.backgroundColor = Color.white;
-
-            // Nút xoá toàn bộ thân
-            if (bodyCount > 0)
-            {
-                GUI.backgroundColor = new Color(1f, 0.85f, 0.85f);
-                if (GUILayout.Button("🗑", GUILayout.Width(30)))
-                {
-                    a.bodyCells.Clear();
-                    if (isThisDrawing) { isDrawing = false; drawFace = -1; drawIndex = -1; }
-                }
-                GUI.backgroundColor = Color.white;
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            // Hiển thị danh sách body cells (chỉ khi đang vẽ arrow này)
-            if (isThisDrawing && a.bodyCells != null && a.bodyCells.Count > 0)
-            {
-                EditorGUI.indentLevel++;
-                for (int c = 0; c < a.bodyCells.Count; c++)
-                {
-                    var bc = a.bodyCells[c];
-                    string faceName = data.faces[bc.faceIndex].faceName;
-                    EditorGUILayout.LabelField($"  {c + 1}. Face {faceName} → ({bc.position.x},{bc.position.y})", EditorStyles.miniLabel);
-                }
-                EditorGUI.indentLevel--;
-            }
-
-            EditorGUILayout.EndVertical();
-            EditorGUILayout.Space(2);
-        }
-
-        if (EditorGUI.EndChangeCheck())
-        {
-            EditorUtility.SetDirty(data);
-            AssetDatabase.SaveAssets();
         }
     }
 
-    // ====================================================================
-    // TÍNH CÁC Ô HỢP LỆ ĐỂ VẼ TIẾP (bao gồm cross-face)
-    // ====================================================================
-    private List<(int face, Vector2Int pos)> GetValidNextCells(ArrowLevelData data)
+    // ================================================================
+    // CLICK HANDLER
+    // ================================================================
+    private void HandleClick(ArrowLevelData ld, int fi, Rect fr, int gs, float px)
     {
-        var result = new List<(int, Vector2Int)>();
-        if (!isDrawing || drawFace < 0 || drawIndex < 0) return result;
-        if (drawFace >= data.faces.Length) return result;
+        Event e = Event.current;
+        if (e.type != EventType.MouseDown || e.button != 0 || !fr.Contains(e.mousePosition)) return;
 
-        FaceData face = data.faces[drawFace];
-        if (drawIndex >= face.arrows.Count) return result;
+        Vector2 loc = e.mousePosition - fr.position;
+        int cx = Mathf.Clamp(Mathf.FloorToInt(loc.x / px), 0, gs - 1);
+        int cy = Mathf.Clamp(gs - 1 - Mathf.FloorToInt(loc.y / px), 0, gs - 1);
+        Vector2Int pos = new Vector2Int(cx, cy);
 
-        ArrowSpawnData arrow = face.arrows[drawIndex];
-
-        // Tìm ô cuối cùng
-        int lastFace;
-        Vector2Int lastPos;
-        if (arrow.bodyCells != null && arrow.bodyCells.Count > 0)
+        switch (state)
         {
-            var last = arrow.bodyCells[arrow.bodyCells.Count - 1];
-            lastFace = last.faceIndex;
-            lastPos = last.position;
+            case State.Idle:
+                TrySelect(ld, fi, pos);
+                break;
+            case State.PlacingHead:
+                DoPlaceHead(ld, fi, pos);
+                break;
+            case State.ChoosingDir:
+                // Hướng chọn qua buttons, nhưng cũng hỗ trợ click adjacent cell
+                TryClickDir(ld, fi, pos);
+                break;
+            case State.DrawingBody:
+                TryExpand(ld, fi, pos);
+                break;
         }
-        else
-        {
-            lastFace = drawFace;
-            lastPos = arrow.position;
-        }
-
-        // Kiểm tra 4 hướng liền kề
-        Vector2Int[] adjDirs = { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left };
-        foreach (var dir in adjDirs)
-        {
-            Vector2Int nextPos = lastPos + dir;
-
-            if (nextPos.x >= 0 && nextPos.x < data.gridSize && nextPos.y >= 0 && nextPos.y < data.gridSize)
-            {
-                // Cùng face, trong lưới
-                if (!IsCellOccupied(data, arrow, drawFace, lastFace, nextPos))
-                    result.Add((lastFace, nextPos));
-            }
-            // TODO: Cross-face drawing tạm tắt — cần recalibrate CubeTopology cho khớp rotation
-            // else
-            // {
-            //     var (newFace, newPos, _) = CubeTopology.CrossEdge(lastFace, lastPos, dir, data.gridSize);
-            //     if (!IsCellOccupied(data, arrow, drawFace, newFace, newPos))
-            //         result.Add((newFace, newPos));
-            // }
-        }
-
-        return result;
+        e.Use();
+        Repaint();
     }
 
-    /// <summary>
-    /// Kiểm tra ô đã bị chiếm bởi arrow hiện tại hoặc arrow khác
-    /// </summary>
-    private bool IsCellOccupied(ArrowLevelData data, ArrowSpawnData currentArrow, int currentArrowFace, int cellFace, Vector2Int cellPos)
+    private void TrySelect(ArrowLevelData ld, int fi, Vector2Int pos)
     {
-        // Kiểm tra đầu của chính nó
-        if (currentArrowFace == cellFace && currentArrow.position == cellPos) return true;
-
-        // Kiểm tra body của chính nó
-        if (currentArrow.bodyCells != null)
+        var face = ld.faces[fi];
+        if (face.arrows != null)
         {
-            foreach (var bc in currentArrow.bodyCells)
-                if (bc.faceIndex == cellFace && bc.position == cellPos) return true;
-        }
-
-        // Kiểm tra các arrow khác trên face đó
-        if (cellFace < data.faces.Length && data.faces[cellFace].arrows != null)
-        {
-            foreach (var other in data.faces[cellFace].arrows)
+            for (int a = 0; a < face.arrows.Count; a++)
             {
-                if (other == currentArrow) continue;
-                if (other.position == cellPos) return true;
-                if (other.bodyCells != null)
-                {
-                    foreach (var bc in other.bodyCells)
-                        if (bc.faceIndex == cellFace && bc.position == cellPos) return true;
-                }
+                if (face.arrows[a].position == pos)
+                { selF = fi; selA = a; return; }
             }
         }
+        selF = -1; selA = -1;
+    }
 
+    private void DoPlaceHead(ArrowLevelData ld, int fi, Vector2Int pos)
+    {
+        if (Occupied(ld, fi, pos, null)) return;
+
+        var face = ld.faces[fi];
+        if (face.arrows == null) face.arrows = new List<ArrowSpawnData>();
+        face.arrows.Add(new ArrowSpawnData
+        {
+            position = pos,
+            initialDirection = Vector2Int.up
+        });
+        selF = fi;
+        selA = face.arrows.Count - 1;
+        state = State.ChoosingDir;
+        EditorUtility.SetDirty(target);
+    }
+
+    private void TryClickDir(ArrowLevelData ld, int fi, Vector2Int pos)
+    {
+        if (selF < 0 || fi != selF) return;
+        var arr = ld.faces[selF].arrows[selA];
+        Vector2Int diff = pos - arr.position;
+        if (Mathf.Abs(diff.x) + Mathf.Abs(diff.y) != 1) return;
+
+        arr.initialDirection = diff;
+        state = State.DrawingBody;
+        RefreshExpand(ld);
+        EditorUtility.SetDirty(target);
+    }
+
+    private void TryExpand(ArrowLevelData ld, int fi, Vector2Int pos)
+    {
+        foreach (var c in expand)
+        {
+            if (c.face == fi && c.pos == pos)
+            {
+                ld.faces[selF].arrows[selA].bodyCells.Add(
+                    new BodyCell { faceIndex = fi, position = pos });
+                RefreshExpand(ld);
+                EditorUtility.SetDirty(target);
+                return;
+            }
+        }
+    }
+
+    // ================================================================
+    // EXPAND CANDIDATES — cross-face via CubeTopology
+    // ================================================================
+    private void RefreshExpand(ArrowLevelData ld)
+    {
+        expand.Clear();
+        if (selF < 0 || selA < 0) return;
+        var arr = ld.faces[selF].arrows[selA];
+        int gs = ld.gridSize;
+
+        // Tail = last body cell or head
+        int tf; Vector2Int tp;
+        if (arr.bodyCells.Count > 0)
+        {
+            var last = arr.bodyCells[arr.bodyCells.Count - 1];
+            tf = last.faceIndex; tp = last.position;
+        }
+        else { tf = selF; tp = arr.position; }
+
+        Vector2Int[] dirs = { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right };
+        foreach (var d in dirs)
+        {
+            Vector2Int np = tp + d;
+            int nf = tf;
+
+            if (np.x < 0 || np.x >= gs || np.y < 0 || np.y >= gs)
+            {
+                // === Cross-face ===
+                var (cf, cp, _) = CubeTopology.CrossEdge(tf, tp, d, gs);
+                nf = cf; np = cp;
+            }
+
+            // Skip self head
+            if (nf == selF && np == arr.position) continue;
+            // Skip existing body cells
+            bool dup = false;
+            foreach (var bc in arr.bodyCells)
+                if (bc.faceIndex == nf && bc.position == np) { dup = true; break; }
+            if (dup) continue;
+            // Skip other arrows
+            if (Occupied(ld, nf, np, arr)) continue;
+
+            expand.Add(new Candidate { face = nf, pos = np });
+        }
+    }
+
+    // ================================================================
+    // COLLISION CHECK
+    // ================================================================
+    private bool Occupied(ArrowLevelData ld, int face, Vector2Int pos, ArrowSpawnData exclude)
+    {
+        for (int f = 0; f < 6; f++)
+        {
+            if (ld.faces[f].arrows == null) continue;
+            foreach (var a in ld.faces[f].arrows)
+            {
+                if (a == exclude) continue;
+                if (f == face && a.position == pos) return true;
+                foreach (var bc in a.bodyCells)
+                    if (bc.faceIndex == face && bc.position == pos) return true;
+            }
+        }
         return false;
     }
 
-    private void ValidateDrawState(ArrowLevelData data)
+    // ================================================================
+    // ARROW LIST
+    // ================================================================
+    private void DrawArrowList(ArrowLevelData ld)
     {
-        if (!isDrawing) return;
-        if (drawFace < 0 || drawFace >= data.faces.Length ||
-            drawIndex < 0 || drawIndex >= data.faces[drawFace].arrows.Count)
+        EditorGUILayout.LabelField("📋 Mũi Tên", EditorStyles.boldLabel);
+
+        GUI.backgroundColor = new Color(0.3f, 0.7f, 1f);
+        if (GUILayout.Button("＋ Mũi Tên Mới", GUILayout.Height(26)))
         {
-            isDrawing = false;
-            drawFace = -1;
-            drawIndex = -1;
+            state = State.PlacingHead;
+            selF = -1; selA = -1;
+            expand.Clear();
+            Repaint();
+        }
+        GUI.backgroundColor = Color.white;
+
+        EditorGUILayout.Space(3);
+
+        for (int f = 0; f < 6; f++)
+        {
+            var face = ld.faces[f];
+            if (face.arrows == null || face.arrows.Count == 0) continue;
+
+            EditorGUILayout.LabelField($"  {FN[f]} ({face.arrows.Count})", EditorStyles.miniLabel);
+
+            for (int a = 0; a < face.arrows.Count; a++)
+            {
+                var arr = face.arrows[a];
+                bool sel = (f == selF && a == selA);
+
+                EditorGUILayout.BeginHorizontal();
+
+                // Select toggle
+                GUI.backgroundColor = sel ? C_SEL : Color.white;
+                if (GUILayout.Button(sel ? "●" : "○", GUILayout.Width(20)))
+                {
+                    if (sel) { selF = -1; selA = -1; state = State.Idle; expand.Clear(); }
+                    else { selF = f; selA = a; state = State.Idle; expand.Clear(); }
+                    Repaint();
+                }
+                GUI.backgroundColor = Color.white;
+
+                // Info
+                string ds = DirSym(arr.initialDirection);
+                int crossN = 0;
+                foreach (var bc in arr.bodyCells) if (bc.faceIndex != f) crossN++;
+                string bodyTxt = crossN > 0 ? $"{arr.bodyCells.Count}({crossN}⨯)" : $"{arr.bodyCells.Count}";
+                EditorGUILayout.LabelField($"({arr.position.x},{arr.position.y}) {ds} thân:{bodyTxt}", GUILayout.Width(155));
+
+                // Draw body button
+                if (sel)
+                {
+                    bool drawing = state == State.DrawingBody;
+                    GUI.backgroundColor = drawing ? new Color(1f, 0.35f, 0.35f) : new Color(0.3f, 0.9f, 0.4f);
+                    if (GUILayout.Button(drawing ? "⏹" : "🖌️", GUILayout.Width(28)))
+                    {
+                        if (drawing) { state = State.Idle; expand.Clear(); }
+                        else { state = State.DrawingBody; RefreshExpand(ld); }
+                        Repaint();
+                    }
+                    GUI.backgroundColor = Color.white;
+                }
+
+                // Delete
+                GUI.backgroundColor = new Color(1f, 0.35f, 0.35f);
+                if (GUILayout.Button("✕", GUILayout.Width(20)))
+                {
+                    face.arrows.RemoveAt(a);
+                    if (sel) { selF = -1; selA = -1; state = State.Idle; expand.Clear(); }
+                    EditorUtility.SetDirty(target);
+                    GUIUtility.ExitGUI();
+                }
+                GUI.backgroundColor = Color.white;
+
+                EditorGUILayout.EndHorizontal();
+
+                // Body detail
+                if (sel && arr.bodyCells.Count > 0)
+                {
+                    EditorGUI.indentLevel += 2;
+                    for (int b = 0; b < arr.bodyCells.Count; b++)
+                    {
+                        var bc = arr.bodyCells[b];
+                        bool cross = bc.faceIndex != f;
+                        EditorGUILayout.BeginHorizontal();
+                        string fn = cross ? $" [{FN[bc.faceIndex]}]" : "";
+                        EditorGUILayout.LabelField($"  {b + 1}: ({bc.position.x},{bc.position.y}){fn}", GUILayout.Width(170));
+                        if (GUILayout.Button("✂", GUILayout.Width(22)))
+                        {
+                            arr.bodyCells.RemoveRange(b, arr.bodyCells.Count - b);
+                            if (state == State.DrawingBody) RefreshExpand(ld);
+                            EditorUtility.SetDirty(target);
+                            break;
+                        }
+                        EditorGUILayout.EndHorizontal();
+                    }
+                    EditorGUI.indentLevel -= 2;
+                }
+            }
         }
     }
 
-    private int GetDirIndex(Vector2Int dir)
+    // ================================================================
+    // DRAWING HELPERS
+    // ================================================================
+    private void CellDraw(Rect fr, int gs, float px, Vector2Int pos, Color col, bool sel, string lbl)
     {
-        for (int i = 0; i < dirs.Length; i++)
-            if (dirs[i] == dir) return i;
-        return -1;
+        if (pos.x < 0 || pos.x >= gs || pos.y < 0 || pos.y >= gs) return;
+        Rect cr = new Rect(fr.x + pos.x * px + 1, fr.y + (gs - 1 - pos.y) * px + 1, px - 2, px - 2);
+        EditorGUI.DrawRect(cr, col);
+
+        if (sel)
+        {
+            float b = Mathf.Max(1, px * 0.09f);
+            EditorGUI.DrawRect(new Rect(cr.x, cr.y, cr.width, b), C_SEL);
+            EditorGUI.DrawRect(new Rect(cr.x, cr.yMax - b, cr.width, b), C_SEL);
+            EditorGUI.DrawRect(new Rect(cr.x, cr.y, b, cr.height), C_SEL);
+            EditorGUI.DrawRect(new Rect(cr.xMax - b, cr.y, b, cr.height), C_SEL);
+        }
+        if (px >= 14f)
+            GUI.Label(cr, lbl, LabelStyle(Color.white, Mathf.Clamp((int)(px * 0.38f), 7, 13), FontStyle.Normal));
+    }
+
+    private void DirSymbol(Rect fr, int gs, float px, Vector2Int pos, Vector2Int dir)
+    {
+        if (pos.x < 0 || pos.x >= gs || pos.y < 0 || pos.y >= gs) return;
+        Rect cr = new Rect(fr.x + pos.x * px + 1, fr.y + (gs - 1 - pos.y) * px + 1, px - 2, px - 2);
+        GUI.Label(cr, DirSym(dir), LabelStyle(C_SEL, Mathf.Clamp((int)(px * 0.55f), 9, 16), FontStyle.Bold));
+    }
+
+    private static string DirSym(Vector2Int d)
+    {
+        if (d == Vector2Int.up) return "↑";
+        if (d == Vector2Int.down) return "↓";
+        if (d == Vector2Int.left) return "←";
+        return "→";
+    }
+
+    private static Color WithAlpha(Color c, float a) => new Color(c.r, c.g, c.b, a);
+
+    private static GUIStyle LabelStyle(Color c, int size, FontStyle fs)
+    {
+        return new GUIStyle(EditorStyles.miniLabel)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            normal = { textColor = c },
+            fontSize = size,
+            fontStyle = fs
+        };
     }
 }
+#endif

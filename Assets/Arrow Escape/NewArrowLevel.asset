@@ -16,43 +16,25 @@ MonoBehaviour:
   faces:
   - faceName: 0_Front
     arrows:
-    - position: {x: 1, y: 3}
-      initialDirection: {x: 0, y: 1}
-      bodyCells:
-      - faceIndex: 0
-        position: {x: 1, y: 2}
-      - faceIndex: 0
-        position: {x: 1, y: 1}
-      - faceIndex: 0
-        position: {x: 1, y: 0}
-      - faceIndex: 0
-        position: {x: 2, y: 0}
-    - position: {x: 3, y: 2}
-      initialDirection: {x: 0, y: -1}
+    - position: {x: 2, y: 3}
+      initialDirection: {x: -1, y: 0}
       bodyCells:
       - faceIndex: 0
         position: {x: 3, y: 3}
       - faceIndex: 0
-        position: {x: 3, y: 4}
-    - position: {x: 0, y: 4}
-      initialDirection: {x: -1, y: 0}
-      bodyCells:
-      - faceIndex: 0
-        position: {x: 1, y: 4}
-      - faceIndex: 0
-        position: {x: 2, y: 4}
-    - position: {x: 4, y: 1}
-      initialDirection: {x: 1, y: 0}
-      bodyCells:
-      - faceIndex: 0
-        position: {x: 3, y: 1}
-      - faceIndex: 0
-        position: {x: 2, y: 1}
-    - position: {x: 2, y: 2}
-      initialDirection: {x: 0, y: -1}
-      bodyCells:
-      - faceIndex: 0
+        position: {x: 4, y: 3}
+      - faceIndex: 3
+        position: {x: 0, y: 3}
+      - faceIndex: 3
+        position: {x: 1, y: 3}
+      - faceIndex: 3
         position: {x: 2, y: 3}
+      - faceIndex: 3
+        position: {x: 3, y: 3}
+      - faceIndex: 3
+        position: {x: 4, y: 3}
+      - faceIndex: 1
+        position: {x: 0, y: 3}
     - position: {x: 0, y: 3}
       initialDirection: {x: 0, y: 1}
       bodyCells:
@@ -60,87 +42,53 @@ MonoBehaviour:
         position: {x: 0, y: 2}
       - faceIndex: 0
         position: {x: 0, y: 1}
-    - position: {x: 0, y: 0}
-      initialDirection: {x: 0, y: -1}
-      bodyCells: []
-    - position: {x: 3, y: 0}
-      initialDirection: {x: -1, y: 0}
-      bodyCells:
       - faceIndex: 0
-        position: {x: 4, y: 0}
-  - faceName: 1_Back
-    arrows:
-    - position: {x: 4, y: 3}
-      initialDirection: {x: 1, y: 0}
-      bodyCells: []
-    - position: {x: 3, y: 3}
-      initialDirection: {x: 0, y: 1}
-      bodyCells: []
-  - faceName: 2_Left
-    arrows:
-    - position: {x: 2, y: 2}
-      initialDirection: {x: 0, y: -1}
-      bodyCells:
-      - faceIndex: 2
-        position: {x: 2, y: 3}
-      - faceIndex: 2
-        position: {x: 2, y: 4}
-      - faceIndex: 2
-        position: {x: 1, y: 4}
-      - faceIndex: 2
-        position: {x: 0, y: 4}
-      - faceIndex: 2
-        position: {x: 0, y: 3}
-      - faceIndex: 2
-        position: {x: 0, y: 2}
-      - faceIndex: 2
-        position: {x: 0, y: 1}
-    - position: {x: 1, y: 3}
-      initialDirection: {x: 0, y: 1}
-      bodyCells:
-      - faceIndex: 2
-        position: {x: 1, y: 2}
-      - faceIndex: 2
-        position: {x: 1, y: 1}
-      - faceIndex: 2
-        position: {x: 1, y: 0}
-      - faceIndex: 2
         position: {x: 0, y: 0}
+      - faceIndex: 5
+        position: {x: 0, y: 4}
+      - faceIndex: 5
+        position: {x: 0, y: 3}
+      - faceIndex: 5
+        position: {x: 0, y: 2}
+      - faceIndex: 5
+        position: {x: 0, y: 1}
+  - faceName: 1_Back
+    arrows: []
+  - faceName: 2_Left
+    arrows: []
   - faceName: 3_Right
     arrows:
-    - position: {x: 2, y: 2}
+    - position: {x: 2, y: 1}
       initialDirection: {x: 0, y: 1}
       bodyCells:
-      - faceIndex: 3
-        position: {x: 2, y: 1}
       - faceIndex: 3
         position: {x: 2, y: 0}
-  - faceName: 4_Top
-    arrows:
-    - position: {x: 2, y: 2}
-      initialDirection: {x: 1, y: 0}
-      bodyCells:
-      - faceIndex: 4
-        position: {x: 1, y: 2}
-      - faceIndex: 4
-        position: {x: 0, y: 2}
-    - position: {x: 4, y: 4}
-      initialDirection: {x: 0, y: 1}
-      bodyCells:
-      - faceIndex: 4
-        position: {x: 4, y: 3}
-      - faceIndex: 4
-        position: {x: 4, y: 2}
-      - faceIndex: 4
-        position: {x: 4, y: 1}
-  - faceName: 5_Bottom
-    arrows:
-    - position: {x: 2, y: 4}
-      initialDirection: {x: 0, y: 1}
-      bodyCells:
       - faceIndex: 5
-        position: {x: 2, y: 3}
+        position: {x: 4, y: 2}
+      - faceIndex: 5
+        position: {x: 3, y: 2}
       - faceIndex: 5
         position: {x: 2, y: 2}
       - faceIndex: 5
-        position: {x: 2, y: 1}
+        position: {x: 2, y: 3}
+      - faceIndex: 5
+        position: {x: 2, y: 4}
+      - faceIndex: 0
+        position: {x: 2, y: 0}
+    - position: {x: 0, y: 0}
+      initialDirection: {x: 0, y: -1}
+      bodyCells:
+      - faceIndex: 3
+        position: {x: 0, y: 1}
+      - faceIndex: 3
+        position: {x: 0, y: 2}
+      - faceIndex: 0
+        position: {x: 4, y: 2}
+      - faceIndex: 0
+        position: {x: 4, y: 1}
+      - faceIndex: 0
+        position: {x: 4, y: 0}
+  - faceName: 4_Top
+    arrows: []
+  - faceName: 5_Bottom
+    arrows: []

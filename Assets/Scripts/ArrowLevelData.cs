@@ -20,8 +20,8 @@ public class ArrowSpawnData
     [Tooltip("Hướng bay khi bấm: (0,1)=Lên, (1,0)=Phải, (0,-1)=Xuống, (-1,0)=Trái")]
     public Vector2Int initialDirection;
     
-    [Header("Thân Mũi Tên (vẽ tay)")]
-    [Tooltip("Danh sách ô thân theo thứ tự nối tiếp từ đầu mũi tên ra phía sau")]
+    [Header("Thân Mũi Tên (vẽ tay — hỗ trợ cross-face)")]
+    [Tooltip("Danh sách ô thân theo thứ tự nối tiếp từ đầu ra đuôi. Mỗi ô có faceIndex riêng → có thể vẽ qua mặt khác")]
     public List<BodyCell> bodyCells = new List<BodyCell>();
 
     /// <summary>

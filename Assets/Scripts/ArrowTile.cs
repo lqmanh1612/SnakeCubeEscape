@@ -10,9 +10,12 @@ public class ArrowTile : MonoBehaviour
     public int startFaceIndex;
     public Vector2Int GridCoords;
 
+    [Header("Visual Segments")]
+    public List<Transform> segments = new List<Transform>();
+    public List<GameObject> outlineObjects = new List<GameObject>();
+
     // Runtime
     private List<BodyCell> allCells;
-    private List<Vector2Int> homeFaceCells; // Chỉ ô trên mặt gốc
     private bool isSliding = false;
 
     public void Setup(FaceGrid grid, ArrowSpawnData spawnData, List<BodyCell> cells, int faceIndex)
@@ -22,11 +25,6 @@ public class ArrowTile : MonoBehaviour
         GridCoords = spawnData.position;
         startFaceIndex = faceIndex;
         allCells = cells;
-
-        // Tách ô trên mặt gốc (dùng cho collision + slide)
-        homeFaceCells = new List<Vector2Int>();
-        foreach (var c in allCells)
-            if (c.faceIndex == faceIndex) homeFaceCells.Add(c.position);
 
         transform.localPosition = grid.GetLocalPosition(GridCoords);
         RegisterAllCells();
@@ -38,9 +36,6 @@ public class ArrowTile : MonoBehaviour
         if (data != null)
         {
             allCells = data.GetAllCells(startFaceIndex);
-            homeFaceCells = new List<Vector2Int>();
-            foreach (var c in allCells)
-                if (c.faceIndex == startFaceIndex) homeFaceCells.Add(c.position);
         }
         RegisterAllCells();
     }
@@ -67,68 +62,173 @@ public class ArrowTile : MonoBehaviour
         }
     }
 
+    // ================================================================
+    // SLIDE — Entry point khi người chơi tap
+    // ================================================================
     public void Slide()
     {
         if (isSliding) return;
-        if (homeFaceCells == null || homeFaceCells.Count == 0) return;
+        if (data == null) return;
 
         Vector2Int dir = data.initialDirection;
         if (dir == Vector2Int.zero) return;
 
-        // ======== COLLISION: quét TOÀN BỘ đường đi từ mỗi ô tới mép ========
-        foreach (var cell in homeFaceCells)
+        if (!CanHeadEscape())
         {
-            Vector2Int checkPos = cell + dir;
-            while (!faceGrid.IsOutOfBounds(checkPos))
-            {
-                ArrowTile other = faceGrid.GetArrowAt(checkPos);
-                if (other != null && other != this)
-                {
-                    PlayBumpBounce();
-                    return;
-                }
-                checkPos += dir;
-            }
+            PlayBumpBounce();
+            return;
         }
 
-        // ======== SLIDE ========
+        PerformSnakeEscape();
+    }
+
+    // ================================================================
+    // COLLISION: Dò đường từ HEAD xuyên nhiều mặt qua CubeTopology
+    // ================================================================
+    /// <summary>
+    /// Quét đường đi phía trước ĐẦU mũi tên — CHỈ trên mặt hiện tại.
+    /// Khi Head chạm mép → thoát ra không gian 3D → return true.
+    /// Chỉ cần đầu thoát được ra khỏi mép mặt → toàn bộ thân sẽ theo.
+    /// </summary>
+    public bool CanHeadEscape()
+    {
+        Vector2Int currPos = data.position;        // Vị trí Head
+        Vector2Int currDir = data.initialDirection;
+
+        FaceGrid headGrid = FaceGrid.GetFace(startFaceIndex);
+        if (headGrid == null) return true;
+
+        // Quét từ Head → mép mặt hiện tại
+        Vector2Int checkPos = currPos + currDir;
+        while (!headGrid.IsOutOfBounds(checkPos))
+        {
+            ArrowTile other = headGrid.GetArrowAt(checkPos);
+            if (other != null && other != this)
+                return false; // Bị chặn bởi mũi tên KHÁC trên cùng mặt
+
+            checkPos += currDir;
+        }
+
+        // Head đã chạm mép mặt → bay ra không gian 3D → thoát!
+        return true;
+    }
+
+    // ================================================================
+    // ANIMATION: Rắn trườn — từng đốt trượt theo đốt phía trước
+    // ================================================================
+    private void PerformSnakeEscape()
+    {
         isSliding = true;
         UnregisterAllCells();
         GameManager.Instance?.OnBlockEscaped();
 
-        // Tính số bước để toàn bộ thân trên mặt gốc thoát lưới
-        int maxSteps = 0;
-        foreach (var cell in homeFaceCells)
+        // === Xây danh sách World Position cho từng cell ===
+        // allCells[0] = Head, allCells[1] = Body1, ..., allCells[N-1] = Tail
+        List<Vector3> cellWorldPositions = new List<Vector3>();
+        foreach (var cell in allCells)
         {
-            int steps;
-            if (dir.x > 0)      steps = faceGrid.gridWidth - cell.x;
-            else if (dir.x < 0) steps = cell.x + 1;
-            else if (dir.y > 0) steps = faceGrid.gridHeight - cell.y;
-            else                steps = cell.y + 1;
-            maxSteps = Mathf.Max(maxSteps, steps);
+            FaceGrid face = FaceGrid.GetFace(cell.faceIndex);
+            if (face != null)
+                cellWorldPositions.Add(face.GetWorldPosition(cell.position));
+            else
+                cellWorldPositions.Add(transform.position);
         }
-        if (maxSteps == 0) maxSteps = 5;
 
-        Vector3 stepVec = new Vector3(dir.x, dir.y, 0f) * faceGrid.cellSize;
-        Vector3 startPos = transform.localPosition;
-        Vector3 edgePos = startPos + stepVec * maxSteps;
-        Vector3 flyPos = edgePos + stepVec * 5f;
+        // Hướng bay 3D thế giới của Head
+        Vector3 headFlyDir = faceGrid.transform.TransformDirection(
+            new Vector3(data.initialDirection.x, data.initialDirection.y, 0f)).normalized;
 
-        Sequence seq = DOTween.Sequence();
-        seq.Append(transform.DOLocalMove(edgePos, maxSteps * 0.07f).SetEase(Ease.Linear));
-        seq.Append(transform.DOLocalMove(flyPos, 0.25f).SetEase(Ease.InCubic));
-        seq.OnComplete(() => Destroy(gameObject));
+        // Điểm bay xa (Head bay ra khỏi cube)
+        Vector3 headStart = cellWorldPositions[0];
+        float flyDist = faceGrid.gridWidth * faceGrid.cellSize * 3f;
+        Vector3 headFlyTarget = headStart + headFlyDir * flyDist;
+
+        // === Animate từng Segment ===
+        float staggerDelay = 0.06f;  // Độ trễ giữa mỗi đốt
+        float slideSpeed = 0.08f;    // Thời gian mỗi đốt trượt qua 1 cell
+        int segCount = Mathf.Min(segments.Count, allCells.Count);
+
+        Sequence masterSeq = DOTween.Sequence();
+
+        for (int i = 0; i < segCount; i++)
+        {
+            Transform seg = segments[i];
+            if (seg == null) continue;
+
+            // Tách segment khỏi root để animate độc lập (world space)
+            seg.SetParent(null);
+
+            float startTime = i * staggerDelay;
+
+            if (i == 0)
+            {
+                // HEAD: bay thẳng ra ngoài theo hướng mũi tên
+                masterSeq.Insert(startTime,
+                    seg.DOMove(headFlyTarget, 0.5f).SetEase(Ease.InCubic));
+            }
+            else
+            {
+                // BODY/TAIL: trượt qua vị trí các đốt phía trước → rồi bay ra
+                List<Vector3> path = new List<Vector3>();
+
+                // Trượt ngược từ vị trí đốt i-1 về đốt 0 (Head)
+                for (int j = i - 1; j >= 0; j--)
+                    path.Add(cellWorldPositions[j]);
+
+                // Cuối cùng bay ra ngoài theo Head
+                path.Add(headFlyTarget);
+
+                float totalDur = path.Count * slideSpeed;
+
+                masterSeq.Insert(startTime,
+                    seg.DOPath(path.ToArray(), totalDur, PathType.Linear)
+                       .SetEase(Ease.Linear));
+            }
+        }
+
+        // Sau khi tất cả segments bay xong → Destroy root
+        masterSeq.OnComplete(() =>
+        {
+            // Destroy từng segment đã tách ra
+            foreach (var seg in segments)
+            {
+                if (seg != null) Destroy(seg.gameObject);
+            }
+            Destroy(gameObject);
+        });
     }
 
+    // ================================================================
+    // BUMP BOUNCE — Rung lắc khi bị chặn
+    // ================================================================
     private void PlayBumpBounce()
     {
         isSliding = true;
-        Vector3 orig = transform.localPosition;
-        Vector3 bump = orig + new Vector3(data.initialDirection.x, data.initialDirection.y, 0f) * 0.2f;
+
+        // Hiện viền đỏ
+        foreach (var outline in outlineObjects)
+        {
+            if (outline != null) outline.SetActive(true);
+        }
+
+        Vector3 worldDir = faceGrid.transform.TransformDirection(
+            new Vector3(data.initialDirection.x, data.initialDirection.y, 0f)).normalized;
+
+        Vector3 rootOrig = transform.position;
+        Vector3 rootBump = rootOrig + worldDir * 0.15f;
 
         Sequence seq = DOTween.Sequence();
-        seq.Append(transform.DOLocalMove(bump, 0.08f).SetEase(Ease.OutQuad));
-        seq.Append(transform.DOLocalMove(orig, 0.08f).SetEase(Ease.InQuad));
-        seq.OnComplete(() => isSliding = false);
+        seq.Append(transform.DOMove(rootBump, 0.06f).SetEase(Ease.OutQuad));
+        seq.Append(transform.DOMove(rootOrig, 0.06f).SetEase(Ease.InQuad));
+        seq.AppendInterval(0.25f); // Giữ viền đỏ thêm 0.25s
+        seq.OnComplete(() =>
+        {
+            // Ẩn viền đỏ
+            foreach (var outline in outlineObjects)
+            {
+                if (outline != null) outline.SetActive(false);
+            }
+            isSliding = false;
+        });
     }
 }

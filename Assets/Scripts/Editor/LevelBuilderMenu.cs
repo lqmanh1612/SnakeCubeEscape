@@ -54,6 +54,12 @@ public class LevelBuilderMenu : MonoBehaviour
         Material inkMat = new Material(Shader.Find("Unlit/Color"));
         inkMat.color = new Color(0.12f, 0.12f, 0.12f, 1f);
 
+        Material headMat = new Material(Shader.Find("Unlit/Color"));
+        headMat.color = new Color(0.0f, 0.75f, 0.85f, 1f); // Cyan cho đầu mũi tên
+
+        Material outlineMat = new Material(Shader.Find("Unlit/Color"));
+        outlineMat.color = new Color(0.95f, 0.15f, 0.15f, 1f); // Đỏ cho viền bị chặn
+
         FaceGrid[] grids = new FaceGrid[6];
         for (int i = 0; i < 6; i++)
         {
@@ -77,7 +83,7 @@ public class LevelBuilderMenu : MonoBehaviour
                 if (f < levelData.faces.Length && levelData.faces[f].arrows != null)
                 {
                     foreach (var arrData in levelData.faces[f].arrows)
-                        BuildArrow(grids, f, arrData, inkMat);
+                        BuildArrow(grids, f, arrData, inkMat, headMat, outlineMat);
                 }
             }
         }
@@ -91,7 +97,7 @@ public class LevelBuilderMenu : MonoBehaviour
         Debug.Log("✅ Ink Arrows Generated!");
     }
 
-    private static void BuildArrow(FaceGrid[] grids, int faceIndex, ArrowSpawnData data, Material inkMat)
+    private static void BuildArrow(FaceGrid[] grids, int faceIndex, ArrowSpawnData data, Material inkMat, Material headMat, Material outlineMat)
     {
         FaceGrid homeGrid = grids[faceIndex];
         List<BodyCell> allCells = data.GetAllCells(faceIndex);
@@ -103,9 +109,15 @@ public class LevelBuilderMenu : MonoBehaviour
         ArrowTile tile = arrowRoot.AddComponent<ArrowTile>();
         tile.Setup(homeGrid, data, allCells, faceIndex);
 
-        DrawFlatInk(arrowRoot, grids, allCells, data.initialDirection, faceIndex, inkMat);
+        // Tạo visual segments + outline riêng biệt cho từng cell
+        List<Transform> segments = new List<Transform>();
+        List<GameObject> outlines = new List<GameObject>();
+        DrawFlatInkSegmented(arrowRoot, grids, allCells, data.initialDirection,
+                             faceIndex, inkMat, headMat, outlineMat, segments, outlines);
+        tile.segments = segments;
+        tile.outlineObjects = outlines;
 
-        // Auto-size collider
+        // Auto-size collider trên root (cho Raycast tap)
         BoxCollider bc = arrowRoot.AddComponent<BoxCollider>();
         if (allCells.Count > 1)
         {
@@ -131,62 +143,101 @@ public class LevelBuilderMenu : MonoBehaviour
     }
 
     // ====================================================================
-    // VẼ NÉT MỰC PHẲNG (hỗ trợ cross-face)
+    // VẼ NÉT MỰC — SEGMENTED (mỗi cell = 1 segment riêng cho snake anim)
     // ====================================================================
-    private static void DrawFlatInk(GameObject arrowRoot, FaceGrid[] grids, List<BodyCell> allCells, 
-        Vector2Int flightDir, int headFaceIndex, Material inkMat)
+    private static void DrawFlatInkSegmented(GameObject arrowRoot, FaceGrid[] grids,
+        List<BodyCell> allCells, Vector2Int flightDir, int headFaceIndex,
+        Material inkMat, Material headMat, Material outlineMat,
+        List<Transform> outSegments, List<GameObject> outOutlines)
     {
         if (allCells.Count == 0) return;
 
         float lineWidth = 0.13f;
         float lineDepth = 0.02f;
         float surfOff = 0.015f;
+        float cellSize = grids[0].cellSize;
         Transform root = arrowRoot.transform;
+        float outlineScale = 1.25f; // Viền lớn hơn 25%
 
-        // Vẽ nét nối giữa từng cặp ô liên tiếp
-        for (int i = 0; i < allCells.Count - 1; i++)
+        for (int i = 0; i < allCells.Count; i++)
         {
-            BodyCell a = allCells[i];
-            BodyCell b = allCells[i + 1];
-
-            // Bỏ qua đoạn xuyên cạnh (khe gập 90° tự nhiên nối)
-            if (a.faceIndex != b.faceIndex) continue;
-
-            FaceGrid face = grids[a.faceIndex];
+            BodyCell cell = allCells[i];
+            FaceGrid face = grids[cell.faceIndex];
             Vector3 fN = face.transform.forward;
-            Vector3 wA = face.GetWorldPosition(a.position);
-            Vector3 wB = face.GetWorldPosition(b.position);
-            float dist = Vector3.Distance(wA, wB);
-            if (dist < 0.01f) continue;
+            Vector3 wPos = face.GetWorldPosition(cell.position) + fN * surfOff;
 
-            Vector3 center = (wA + wB) / 2f + fN * surfOff;
-            Vector3 dir = (wB - wA).normalized;
+            // === Container segment cho cell này ===
+            GameObject seg = new GameObject($"Segment_{i}");
+            seg.transform.position = wPos;
+            seg.transform.rotation = face.transform.rotation;
+            seg.transform.SetParent(root, true);
 
-            GameObject seg = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            DestroyImmediate(seg.GetComponent<Collider>());
-            seg.transform.SetParent(root);
-            seg.transform.position = center;
-            seg.transform.rotation = Quaternion.LookRotation(dir, fN);
-            seg.transform.localScale = new Vector3(lineWidth, lineDepth, dist + lineWidth * 0.4f);
-            seg.GetComponent<MeshRenderer>().material = inkMat;
+            // === Nút khối vuông đại diện ô (FIX: localRotation = identity) ===
+            GameObject vis = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            DestroyImmediate(vis.GetComponent<Collider>());
+            vis.transform.SetParent(seg.transform);
+            vis.transform.localPosition = Vector3.zero;
+            vis.transform.localRotation = Quaternion.identity;
+            vis.transform.localScale = new Vector3(cellSize * 0.65f, cellSize * 0.65f, lineDepth);
+            vis.GetComponent<MeshRenderer>().material = (i == 0) ? headMat : inkMat;
+
+            // === Đường viền đỏ (ẩn mặc định, hiện khi bị chặn) ===
+            GameObject outline = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            DestroyImmediate(outline.GetComponent<Collider>());
+            outline.name = "Outline";
+            outline.transform.SetParent(seg.transform);
+            outline.transform.localPosition = new Vector3(0f, 0f, -0.001f);
+            outline.transform.localRotation = Quaternion.identity;
+            outline.transform.localScale = new Vector3(
+                cellSize * 0.65f * outlineScale, cellSize * 0.65f * outlineScale, lineDepth * 0.5f);
+            outline.GetComponent<MeshRenderer>().material = outlineMat;
+            outline.SetActive(false);
+            outOutlines.Add(outline);
+
+            // === Nếu là Head (i==0): thêm chóp mũi tên ===
+            if (i == 0)
+            {
+                Vector3 dW = face.transform.TransformDirection(
+                    new Vector3(flightDir.x, flightDir.y, 0f)).normalized;
+                Vector3 tip = wPos + dW * (cellSize * 0.35f);
+
+                GameObject head = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                DestroyImmediate(head.GetComponent<Collider>());
+                head.transform.SetParent(seg.transform);
+                head.transform.position = tip;
+                head.transform.rotation = Quaternion.LookRotation(dW, fN)
+                                          * Quaternion.Euler(0, 0, 45f);
+                float ts = lineWidth * 2f;
+                head.transform.localScale = new Vector3(ts, lineDepth, ts);
+                head.GetComponent<MeshRenderer>().material = headMat;
+            }
+
+            // === Nét nối tới cell tiếp theo (i+1) — chỉ nếu cùng mặt ===
+            if (i < allCells.Count - 1)
+            {
+                BodyCell nextCell = allCells[i + 1];
+                if (nextCell.faceIndex == cell.faceIndex)
+                {
+                    Vector3 wNext = face.GetWorldPosition(nextCell.position) + fN * surfOff;
+                    float dist = Vector3.Distance(wPos, wNext);
+                    if (dist > 0.01f)
+                    {
+                        Vector3 center = (wPos + wNext) / 2f;
+                        Vector3 dir = (wNext - wPos).normalized;
+
+                        GameObject line = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        DestroyImmediate(line.GetComponent<Collider>());
+                        line.transform.SetParent(seg.transform);
+                        line.transform.position = center;
+                        line.transform.rotation = Quaternion.LookRotation(dir, fN);
+                        line.transform.localScale = new Vector3(lineWidth, lineDepth, dist + lineWidth * 0.4f);
+                        line.GetComponent<MeshRenderer>().material = inkMat;
+                    }
+                }
+            }
+
+            outSegments.Add(seg.transform);
         }
-
-        // Chóp mũi tên
-        BodyCell headCell = allCells[0];
-        FaceGrid hFace = grids[headCell.faceIndex];
-        Vector3 hN = hFace.transform.forward;
-        Vector3 hW = hFace.GetWorldPosition(headCell.position) + hN * surfOff;
-        Vector3 dW = hFace.transform.TransformDirection(new Vector3(flightDir.x, flightDir.y, 0f)).normalized;
-        Vector3 tip = hW + dW * (hFace.cellSize * 0.35f);
-
-        GameObject head = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        DestroyImmediate(head.GetComponent<Collider>());
-        head.transform.SetParent(root);
-        head.transform.position = tip;
-        head.transform.rotation = Quaternion.LookRotation(dW, hN) * Quaternion.Euler(0, 0, 45f);
-        float ts = lineWidth * 2f;
-        head.transform.localScale = new Vector3(ts, lineDepth, ts);
-        head.GetComponent<MeshRenderer>().material = inkMat;
     }
 
     private static Material CreateSafeMaterial(Color color)

@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61681e412f21d9a42ae2a14233b43bb1, type: 3}
+  m_Name: LevelDatabase
+  m_EditorClassIdentifier: Assembly-CSharp::LevelDatabase
+  levels:
+  - {fileID: 11400000, guid: 3890a627a9afd5248aeb420a16c8cf2c, type: 2}
+  - {fileID: 11400000, guid: e35567b3b0a232647870609584d23b83, type: 2}
+  - {fileID: 11400000, guid: 682fa31141d55a947b9864bbc1a9dee7, type: 2}
+  - {fileID: 11400000, guid: bca209ace2e1c2a4a978a81d8cd14d86, type: 2}
+  - {fileID: 11400000, guid: 9041aa38e2eb4d843a88c10749b46bba, type: 2}
+  centralCubeMaterial: {fileID: 2100000, guid: cf4fb941e01f2f542b938884cdb9a260, type: 2}
+  inkMaterial: {fileID: 2100000, guid: a0d9ce36708141443823ba1e9fe7964b, type: 2}
+  headMaterial: {fileID: 2100000, guid: e9ccfe2266cd86a4887c3016b9d523f2, type: 2}
+  outlineMaterial: {fileID: 2100000, guid: 7522d168d5205ca419351a4c8128c86e, type: 2}

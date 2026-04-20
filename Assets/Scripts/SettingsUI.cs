@@ -10,6 +10,7 @@ public class SettingsUI : MonoBehaviour
     public Button buttonHome;
     public Button buttonRestart;
     public Button buttonBackGame;
+    public Button buttonExitGame;
     public Scrollbar scrollbarSound;
 
     private const string SoundPrefKey = "GameVolume";
@@ -25,6 +26,7 @@ public class SettingsUI : MonoBehaviour
             if (buttonHome == null && child.name == "ButtonHome") buttonHome = child.GetComponent<Button>();
             if (buttonRestart == null && child.name == "ButtonRestart") buttonRestart = child.GetComponent<Button>();
             if (buttonBackGame == null && child.name == "ButtonBackGame") buttonBackGame = child.GetComponent<Button>();
+            if (buttonExitGame == null && child.name == "ButtonExitGame") buttonExitGame = child.GetComponent<Button>();
             if (scrollbarSound == null && child.name == "ScrollbarSound") scrollbarSound = child.GetComponent<Scrollbar>();
         }
 
@@ -33,6 +35,7 @@ public class SettingsUI : MonoBehaviour
         if (buttonHome != null) buttonHome.onClick.AddListener(GotoHome);
         if (buttonRestart != null) buttonRestart.onClick.AddListener(RestartGame);
         if (buttonBackGame != null) buttonBackGame.onClick.AddListener(CloseSettings);
+        if (buttonExitGame != null) buttonExitGame.onClick.AddListener(ExitGame);
         
         // Khởi tạo âm lượng
         if (scrollbarSound != null)
@@ -78,11 +81,21 @@ public class SettingsUI : MonoBehaviour
         SceneManager.LoadScene("HomeScene");
     }
 
-    private void RestartGame()
+    public void RestartGame()
     {
         // Reset timeScale trước khi reload màn chơi
         Time.timeScale = 1;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    public void ExitGame()
+    {
+        Debug.Log("Exiting game...");
+        Application.Quit();
+        
+        #if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+        #endif
     }
 
     private void OnSoundVolumeChanged(float value)

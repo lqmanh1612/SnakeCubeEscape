@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 public class FaceGrid : MonoBehaviour
 {
-    public int faceIndex;
+    public int faceIndex = -1;
     public int gridWidth = 5;
     public int gridHeight = 5;
     public float cellSize = 1f;
@@ -18,6 +18,20 @@ public class FaceGrid : MonoBehaviour
     {
         if (allFaces.ContainsKey(faceIndex) && allFaces[faceIndex] == this)
             allFaces.Remove(faceIndex);
+    }
+
+    /// <summary>
+    /// Gán faceIndex và đăng ký lại vào từ điển tĩnh. 
+    /// FIX lỗi khi AddComponent ở runtime, OnEnable chạy trước khi faceIndex được gán.
+    /// </summary>
+    public void SetFaceIndex(int index)
+    {
+        if (allFaces.ContainsKey(faceIndex) && allFaces[faceIndex] == this)
+        {
+            allFaces.Remove(faceIndex);
+        }
+        faceIndex = index;
+        allFaces[faceIndex] = this;
     }
 
     public static FaceGrid GetFace(int index)

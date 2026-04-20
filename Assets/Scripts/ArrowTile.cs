@@ -83,12 +83,12 @@ public class ArrowTile : MonoBehaviour
     }
 
     // ================================================================
-    // COLLISION: Dò đường từ HEAD xuyên nhiều mặt qua CubeTopology
+    // COLLISION: Kiểm tra đường đi trên mặt hiện tại
     // ================================================================
     /// <summary>
     /// Quét đường đi phía trước ĐẦU mũi tên — CHỈ trên mặt hiện tại.
-    /// Khi Head chạm mép → thoát ra không gian 3D → return true.
-    /// Chỉ cần đầu thoát được ra khỏi mép mặt → toàn bộ thân sẽ theo.
+    /// Khi Head chạm mép mặt → thoát ra không gian 3D → return true.
+    /// Nếu gặp mũi tên khác trên đường đi → return false (bị chặn).
     /// </summary>
     public bool CanHeadEscape()
     {
@@ -103,8 +103,9 @@ public class ArrowTile : MonoBehaviour
         while (!headGrid.IsOutOfBounds(checkPos))
         {
             ArrowTile other = headGrid.GetArrowAt(checkPos);
-            if (other != null && other != this)
-                return false; // Bị chặn bởi mũi tên KHÁC trên cùng mặt
+            // Block if ANY arrow is in the way, INCLUDING its own body segments
+            if (other != null)
+                return false;
 
             checkPos += currDir;
         }
@@ -120,7 +121,11 @@ public class ArrowTile : MonoBehaviour
     {
         isSliding = true;
         UnregisterAllCells();
-        GameManager.Instance?.OnBlockEscaped();
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnBlockEscaped();
+            GameManager.Instance.PlayEscapeSound();
+        }
 
         // === Xây danh sách World Position cho từng cell ===
         // allCells[0] = Head, allCells[1] = Body1, ..., allCells[N-1] = Tail
@@ -208,6 +213,11 @@ public class ArrowTile : MonoBehaviour
     private void PlayBumpBounce()
     {
         isSliding = true;
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.PlayBumpSound();
+        }
 
         // Hiện viền đỏ
         foreach (var outline in outlineObjects)

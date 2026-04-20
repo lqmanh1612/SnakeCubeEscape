@@ -1,17 +1,25 @@
-# IDE folders
-.vs/
-.vscode/
-bin/
-obj/
-
 # Unity standard gitignore
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/
 [Bb]uild/
 [Bb]uilds/
+/[Bb]uild*/
 [Ll]ogs/
 [Mm]emoryCaptures/
+/[Vv]isualStudio/
+
+# Asset meta data when using external version control
+# .meta files should be included
+
+# UserSettings should be ignored as they are local to the editor
+[Uu]ser[Ss]ettings/
+
+# IDE folders
+.vs/
+.vscode/
+bin/
+obj/
 *.csproj
 *.unityproj
 *.sln
@@ -30,9 +38,12 @@ obj/
 *.v14.suo
 *.v15.suo
 
-# Asset meta data when using external version control
-# .meta files should be included
-
 # OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
 Thumbs.db

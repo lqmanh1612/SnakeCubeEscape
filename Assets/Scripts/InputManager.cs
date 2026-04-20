@@ -10,6 +10,9 @@ public class InputManager : MonoBehaviour
 
     void Update()
     {
+        // Nếu game đang tạm dừng (ví dụ: đang mở bảng cài đặt), không xử lý input di chuyển
+        if (Time.timeScale == 0) return;
+
         if (Pointer.current == null) return;
 
         // Touch or Mouse Logic
